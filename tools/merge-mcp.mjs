@@ -189,63 +189,68 @@ if (trimmed === '' || trimmed === '{}') {
   result = `{\n  "mcp": {\n    "${KEY}": ${gv}\n  }\n}\n`;
   status = 'INSERTED';
 } else {
-  const root = rootObject(text0);
-  const rootMembers = members(text0, root);
-  const mcp = rootMembers.members.find((m) => m.key === 'mcp');
-  const unit = detectUnit(text0);
+  try {
+    const root = rootObject(text0);
+    const rootMembers = members(text0, root);
+    const mcp = rootMembers.members.find((m) => m.key === 'mcp');
+    const unit = detectUnit(text0);
 
-  if (!mcp) {
-    const rootIndent = rootMembers.members.length ? lineIndent(text0, rootMembers.members[0].keyStart) : '  ';
-    const rootCloseIndent = rootIndent.endsWith(unit) ? rootIndent.slice(0, -unit.length) : rootIndent;
-    const m1 = rootIndent;          // "mcp" line indent (same level as siblings)
-    const m2 = rootIndent + unit;   // "gbrain" line indent
-    const gv = emitValue(fragValue, m2, unit);
-    const insertAt = rootMembers.members.length
-      ? rootMembers.members[rootMembers.members.length - 1].valueEnd
-      : root + 1;
-    const comma = rootMembers.members.length ? ',' : '';
-    // fix the root's closing brace indentation inside the tail
-    const rel = rootMembers.close - insertAt;
-    const beforeClose = text0.slice(insertAt, insertAt + rel).replace(/(\r?\n)[ \t]*$/, `$1${rootCloseIndent}`);
-    const tail = beforeClose + text0.slice(insertAt + rel);
-    const insertText = `${comma}\n${m1}"mcp": {\n${m2}"${KEY}": ${gv}\n${m1}}`;
-    result = text0.slice(0, insertAt) + insertText + tail;
-    status = 'INSERTED_MCP';
-  } else {
-    const mcpObj = members(text0, skipWsComments(text0, mcp.valueStart));
-    const existing = mcpObj.members.find((m) => m.key === KEY);
-
-    if (!existing) {
-      const memberIndent = mcpObj.members.length
-        ? lineIndent(text0, mcpObj.members[0].keyStart)
-        : lineIndent(text0, mcp.keyStart) + unit;
-      const gv = emitValue(fragValue, memberIndent, unit);
-      if (mcpObj.members.length) {
-        const insertAt = mcpObj.members[mcpObj.members.length - 1].valueEnd;
-        result = text0.slice(0, insertAt) + `,\n${memberIndent}"${KEY}": ${gv}` + text0.slice(insertAt);
-      } else {
-        // empty mcp object: fill it, keeping its closing brace aligned with "mcp"
-        const closeIndent = lineIndent(text0, mcp.keyStart);
-        result = text0.slice(0, mcp.valueStart + 1) +
-          `\n${memberIndent}"${KEY}": ${gv}\n${closeIndent}` +
-          text0.slice(mcpObj.close);
-      }
-      status = 'INSERTED';
+    if (!mcp) {
+      const rootIndent = rootMembers.members.length ? lineIndent(text0, rootMembers.members[0].keyStart) : '  ';
+      const rootCloseIndent = rootIndent.endsWith(unit) ? rootIndent.slice(0, -unit.length) : rootIndent;
+      const m1 = rootIndent;          // "mcp" line indent (same level as siblings)
+      const m2 = rootIndent + unit;   // "gbrain" line indent
+      const gv = emitValue(fragValue, m2, unit);
+      const insertAt = rootMembers.members.length
+        ? rootMembers.members[rootMembers.members.length - 1].valueEnd
+        : root + 1;
+      const comma = rootMembers.members.length ? ',' : '';
+      // fix the root's closing brace indentation inside the tail
+      const rel = rootMembers.close - insertAt;
+      const beforeClose = text0.slice(insertAt, insertAt + rel).replace(/(\r?\n)[ \t]*$/, `$1${rootCloseIndent}`);
+      const tail = beforeClose + text0.slice(insertAt + rel);
+      const insertText = `${comma}\n${m1}"mcp": {\n${m2}"${KEY}": ${gv}\n${m1}}`;
+      result = text0.slice(0, insertAt) + insertText + tail;
+      status = 'INSERTED_MCP';
     } else {
-      const existingText = text0.slice(existing.valueStart, existing.valueEnd);
-      const parsed = tryParseJsonc(existingText);
-      const same = parsed !== undefined && JSON.stringify(parsed) === JSON.stringify(fragValue);
-      if (same) {
-        status = 'UNCHANGED';
-      } else if (!REPLACE) {
-        status = 'KEPT';
-      } else {
-        const memberIndent = lineIndent(text0, existing.keyStart);
+      const mcpObj = members(text0, skipWsComments(text0, mcp.valueStart));
+      const existing = mcpObj.members.find((m) => m.key === KEY);
+
+      if (!existing) {
+        const memberIndent = mcpObj.members.length
+          ? lineIndent(text0, mcpObj.members[0].keyStart)
+          : lineIndent(text0, mcp.keyStart) + unit;
         const gv = emitValue(fragValue, memberIndent, unit);
-        result = text0.slice(0, existing.keyStart) + `"${KEY}": ${gv}` + text0.slice(existing.valueEnd);
-        status = 'REPLACED';
+        if (mcpObj.members.length) {
+          const insertAt = mcpObj.members[mcpObj.members.length - 1].valueEnd;
+          result = text0.slice(0, insertAt) + `,\n${memberIndent}"${KEY}": ${gv}` + text0.slice(insertAt);
+        } else {
+          // empty mcp object: fill it, keeping its closing brace aligned with "mcp"
+          const closeIndent = lineIndent(text0, mcp.keyStart);
+          result = text0.slice(0, mcp.valueStart + 1) +
+            `\n${memberIndent}"${KEY}": ${gv}\n${closeIndent}` +
+            text0.slice(mcpObj.close);
+        }
+        status = 'INSERTED';
+      } else {
+        const existingText = text0.slice(existing.valueStart, existing.valueEnd);
+        const parsed = tryParseJsonc(existingText);
+        const same = parsed !== undefined && JSON.stringify(parsed) === JSON.stringify(fragValue);
+        if (same) {
+          status = 'UNCHANGED';
+        } else if (!REPLACE) {
+          status = 'KEPT';
+        } else {
+          const memberIndent = lineIndent(text0, existing.keyStart);
+          const gv = emitValue(fragValue, memberIndent, unit);
+          result = text0.slice(0, existing.keyStart) + `"${KEY}": ${gv}` + text0.slice(existing.valueEnd);
+          status = 'REPLACED';
+        }
       }
     }
+  } catch (e) {
+    console.error(`merge-mcp: ERROR target is not valid JSONC (${e.message}); file left untouched.`);
+    process.exit(2);
   }
 }
 
