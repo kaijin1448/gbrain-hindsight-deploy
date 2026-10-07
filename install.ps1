@@ -48,13 +48,16 @@ Write-Host ("  repository ready: " + $root.FullName)
 Write-Host "  launching deploy.ps1 ..." -ForegroundColor Cyan
 Write-Host ""
 
-$argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $child) + $DeployArgs
-$p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -ArgumentList $argList
+# Run in the SAME console (call operator, not Start-Process) so the child's
+# progress output streams live to the user; then report its exit code.
+$exeArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $child) + $DeployArgs
+& powershell.exe @exeArgs
+$code = $LASTEXITCODE
 
 # Do NOT call `exit` here: when run via `irm ... | iex` this script executes in
 # the caller's session, and `exit` would close the user's console window.
-if ($p.ExitCode -ne 0) {
-  Write-Host ("deploy.ps1 finished with exit code " + $p.ExitCode + " - review the [WARN]/[ERR] lines above.") -ForegroundColor Yellow
+if ($code -ne 0) {
+  Write-Host ("deploy.ps1 finished with exit code " + $code + " - review the [WARN]/[ERR] lines above.") -ForegroundColor Yellow
 } else {
   Write-Host "deploy.ps1 finished successfully." -ForegroundColor Green
 }
