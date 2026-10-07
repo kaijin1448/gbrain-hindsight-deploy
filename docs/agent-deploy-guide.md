@@ -11,7 +11,7 @@
 # 在仓库目录内：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
 # 或远程：
-irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/deploy.ps1 | iex
+irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/install.ps1 | iex
 ```
 
 非交互参数（先向用户问清再执行）：

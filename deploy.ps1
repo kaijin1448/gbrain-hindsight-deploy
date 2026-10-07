@@ -57,8 +57,12 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
 
 .EXAMPLE
-  # 远程一键（下载仓库 zip 后自动执行）
-  irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/deploy.ps1 | iex
+  # 远程一键（推荐走 install.ps1 —— 纯 ASCII 无 BOM，iex 管道安全）
+  irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/install.ps1 | iex
+
+.EXAMPLE
+  # 由 install.ps1 自举进入时会自动调用本脚本；也可单独下载后 -File 运行
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
 
 .EXAMPLE
   # 全自动（带网关参数）

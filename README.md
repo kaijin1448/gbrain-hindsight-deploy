@@ -23,8 +23,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
 **方式 B：远程一行（自动下载仓库并执行）**
 
 ```powershell
-irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/deploy.ps1 | iex
+irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/install.ps1 | iex
 ```
+
+> 一键脚本必须用 `install.ps1`（纯 ASCII、无 BOM）。`deploy.ps1` 含中文、必须带 UTF-8 BOM，而 PowerShell 5.1 的 `irm | iex` 不会剥离 BOM 首字符会导致解析失败——`install.ps1` 正是为此存在的纯 ASCII 引导壳：它下载仓库后以 `-File` 方式调用 `deploy.ps1`（`-File` 能正确处理 BOM）。
 
 部署器会逐步完成 7 件事，并在需要时向你提问（网关地址/Key、`~\.llama` 来源）：
 
@@ -70,7 +72,8 @@ irm https://raw.githubusercontent.com/kaijin1448/gbrain-hindsight-deploy/main/de
 
 ```
 gbrain-hindsight-deploy/
-├─ deploy.ps1              一键部署器（支持 irm|iex 自举）
+├─ install.ps1             远程一键引导壳（纯 ASCII 无 BOM，供 irm|iex 用）
+├─ deploy.ps1              一键部署器（含中文/BOM，供 -File 或由 install.ps1 调用）
 ├─ verify.ps1              验收检查（对齐报告 §6 清单）
 ├─ scripts/                → %USERPROFILE%\.config\opencode\memory\scripts\
 │   ├─ gbrain-capture-export.ts   常驻导出器（对话→语料；内容寻址、幂等、脱敏）

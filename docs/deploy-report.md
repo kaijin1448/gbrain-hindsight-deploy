@@ -19,7 +19,7 @@
 - **磁盘占用**：约 1.5GB（两个模型 1.2GB + 大脑数据库数百 MB）
 - **内存要求**：建议 ≥16GB（两个 llama 服务 + opencode 合计约 6–8GB；不足时降级策略见 §5.3）
 - **全程无需管理员权限**（自启用 Startup 文件夹实现）
-- **本仓库用法（一键）**：`git clone` 后运行 `deploy.ps1`（或 `irm .../deploy.ps1 | iex`）→ 自动完成全部部署；或把仓库交给目标机的 AI 代理，让它读 `docs/agent-deploy-guide.md` 执行
+- **本仓库用法（一键）**：`git clone` 后运行 `deploy.ps1`（或 `irm .../install.ps1 | iex`）→ 自动完成全部部署；或把仓库交给目标机的 AI 代理，让它读 `docs/agent-deploy-guide.md` 执行
 
 ---
 
@@ -311,7 +311,8 @@ netstat -ano | findstr :18081
 
 ```
 gbrain-hindsight-deploy\
-├─ deploy.ps1              ← 一键部署器（支持 irm|iex 自举、幂等、自动备份、-DryRun）
+├─ install.ps1             ← 远程一键引导壳（纯 ASCII 无 BOM；供 irm|iex）
+├─ deploy.ps1              ← 一键部署器（幂等、自动备份、-DryRun；由 install.ps1 或 -File 调用）
 ├─ verify.ps1              ← 验收脚本（对齐 §6 清单）
 ├─ README.md               ← 快速开始与运维速查
 ├─ scripts\                → 复制到 ~\.config\opencode\memory\scripts\
