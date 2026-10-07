@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GBrain Hindsight 三件套 · 部署与适配报告</title>
+<style>
+:root{--ink:#22221f;--cobalt:#1f4e9c;--green:#2e8b57;--muted:#6b6b66;--line:#e6e6e0;--codebg:#f6f7f9}
+*{box-sizing:border-box}
+body{margin:0;background:#f2f2ee;color:var(--ink);font:15px/1.75 "Microsoft YaHei","Segoe UI",system-ui,sans-serif}
+.page{max-width:920px;margin:26px auto 60px;background:#fff;padding:52px 60px;box-shadow:0 2px 24px rgba(0,0,0,.08);border-radius:6px}
+h1{font-size:27px;color:#1a1a17;border-bottom:3px solid var(--cobalt);padding-bottom:12px;margin-top:6px}
+h2{font-size:20px;color:var(--cobalt);border-left:5px solid var(--cobalt);padding-left:10px;margin-top:38px}
+h3{font-size:16px;color:#1a1a17;margin-top:26px}
+hr{border:0;border-top:1px solid var(--line);margin:30px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+th{background:var(--cobalt);color:#fff;text-align:left;padding:8px 10px}
+td{border:1px solid var(--line);padding:7px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:var(--codebg);padding:1px 5px;border-radius:3px;font-family:Consolas,"Courier New",monospace;font-size:13px;color:#b3261e}
+pre{background:#10233f;color:#e8eefc;padding:14px 16px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.65}
+pre code{background:none;color:inherit;padding:0}
+blockquote{margin:14px 0;padding:10px 16px;background:#f4f8f4;border-left:4px solid var(--green);color:#334}
+ul{padding-left:24px}
+li.todo{list-style:none;margin-left:-20px}
+li.done{color:var(--muted)}
+.meta{color:var(--muted);font-size:13px;margin-bottom:0}
+@media print{body{background:#fff}.page{box-shadow:none;margin:0;padding:0 8mm}}
+</style>
+</head>
+<body><div class="page">
+<h1>GBrain「Hindsight 三件套」部署与适配报告（可分享版）</h1>
+<ul><li><strong>版本</strong>：v1.2 · 2026-09-29（v1.2：重排迁至独立端口 18081；嵌入 18080——两个本地模型服务均与 80xx 段分家）</li><li><strong>来源环境</strong>：Windows 10 专业版 / 15.4GB 内存 / opencode 桌面版 / GBrain 0.52.1.0 / llama.cpp b11136</li><li><strong>适用范围</strong>：Windows 10/11 电脑，迁移部署「会话自动抽取 + 语义检索与重排 + takes 学习」三件套</li><li><strong>安全说明</strong>：本文与配套部署包<strong>不含任何密钥</strong>；网关地址/Key 请向管理员获取或替换为你自己的 OpenAI 兼容服务</li></ul>
+<hr/>
+<h2>0. 一页速览（TL;DR）</h2>
+<table><thead><tr><th>件</th><th>作用</th><th>部署物</th></tr></thead><tbody><tr><td>① 会话自动抽取</td><td>opencode 的对话<strong>自动</strong>变成可检索记忆（不用再"记得去记"）</td><td>常驻导出器（bun，180s 循环）</td></tr><tr><td>② 语义检索 + 重排</td><td>提问按"意思"找回记忆，再经本地模型重排提高命中质量</td><td>本地嵌入服务 + 本地重排服务</td></tr><tr><td>③ takes / 做梦</td><td>定期把事实蒸馏成"观察/结论"，纠偏不覆盖</td><td>维护脚本（dream 六相位）</td></tr></tbody></table>
+<ul><li><strong>部署耗时</strong>：约 1–2 小时（拷贝模型占大头）+ 一次 ≥5 分钟关窗初始化</li><li><strong>磁盘占用</strong>：约 1.5GB（两个模型 1.2GB + 大脑数据库数百 MB）</li><li><strong>内存要求</strong>：建议 ≥16GB（两个 llama 服务 + opencode 合计约 6–8GB；不足时降级策略见 §5.3）</li><li><strong>全程无需管理员权限</strong>（自启用 Startup 文件夹实现）</li><li><strong>本包用法（傻瓜式）</strong>：整个文件夹交给目标机的 opencode → 说「按 <code>01-部署指令（给opencode）.md</code> 部署」→ AI 自动执行；人只需配合关一次窗口（见 <code>00-先读我（人看）.md</code>）</li></ul>
+<hr/>
+<h2>1. 总览与数据流</h2>
+<pre><code>【写入链 · 自动】
+opencode 会话消息
+    │  gbrain-capture-export.ts（常驻，每 180s 一趟，限流 12 段/趟）
+    ▼
+~\.gbrain\transcripts\corpus\oc-*.txt     （≤7600 字符/段，内容寻址、幂等、脱敏）
+    │  gbrain sweep（serve 存活时经 IPC 委托，每 ≥5min 一批，300s 预算）
+    ▼
+facts 库（default_visibility=world）+ 页面 → 跨会话可召回
+
+【读取链 · 检索】
+提问 ─▶ gbrain serve ─▶ 查询嵌入（bge-m3 @127.0.0.1:18080）
+                          │
+                          ▼
+             混合检索：向量 + 关键词（RRF 融合）
+                          │
+                          ▼
+             重排：Qwen3-Reranker @127.0.0.1:18081（fail-open）
+                          │
+                          ▼
+                       结果
+
+【学习链 · 维护窗口（须完全退出 opencode ≥5 分钟）】
+brain-maintenance.ps1：
+  锁探测 ─▶ llama 服务就绪（端点探针）─▶ 配置固化（world / reranker）
+  ─▶ 写初始化 marker ─▶ 全量导出铺底 ─▶ dream 六相位：
+     extract_facts → consolidate → propose_takes → grade_takes
+     → calibration_profile → embed</code></pre>
+<p><strong>关键设计（为什么这么做）</strong>： 1. <strong>导出器必须"写门控"</strong>：初始化 marker 写入前不写盘、不 sweep —— 防止初始批次 facts 落成 private 不可见。 2. <strong>sweep 一律经 serve 委托</strong>（IPC）：PGLite 单写者，绝不让独立进程与 serve 抢锁。 3. <strong>本地服务一律 <code>127.0.0.1</code></strong>：绕开 <code>localhost</code> 的 IPv6(::1) 解析歧义与同端口野生监听（见 §8 坑表）。 4. <strong>一切健康检查用"端点探针"</strong>，不用 TCP 连通性 —— 同端口 wildcard 应用会制造"假活着"。</p>
+<hr/>
+<h2>2. 先决条件</h2>
+<table><thead><tr><th>组件</th><th>版本 / 规格</th><th>获取方式</th></tr></thead><tbody><tr><td>opencode 桌面版</td><td>支持 MCP local server</td><td>公司内分发/官网</td></tr><tr><td>bun</td><td>≥1.x（本机实测可用）</td><td>bun 官方安装脚本</td></tr><tr><td>GBrain CLI</td><td>≥0.52.1（本机 0.52.1.0；0.59.x 已发布，可自行评估升级）</td><td><code>bun install -g gbrain</code>（或按官方文档）</td></tr><tr><td>llama.cpp（Windows）</td><td>本机 b11136（version 0.4.1-dev）整套放入 <code>~\.llama\bin</code></td><td>直接拷贝本机 <code>~\.llama</code>（推荐）或 llama.cpp Releases 下载</td></tr><tr><td>嵌入模型</td><td><code>bge-m3-Q8_0.gguf</code>（605MB，1024 维）</td><td>拷贝本机 <code>~\.llama\models</code>，或 HuggingFace 下载</td></tr><tr><td>重排模型</td><td><code>qwen3-reranker-0.6b-q8_0.gguf</code>（610MB）</td><td>同上</td></tr><tr><td>chat / expansion 端点</td><td>任意 OpenAI 兼容（本机组用公司内网关 <code>deepseek-flash</code>）</td><td>向管理员获取地址与 Key（<strong>绝不写入共享文件</strong>）</td></tr><tr><td>Python（可选）</td><td>任意 3.x</td><td>仅用于辅助校验脚本</td></tr></tbody></table>
+<hr/>
+<h2>3. 部署步骤（每步含验证）</h2>
+<h3>S1 安装 bun + gbrain</h3>
+<pre><code># 安装 bun（官方脚本或拷贝本机），随后：
+bun install -g gbrain
+gbrain --version        # 期望输出：0.52.x 或更高</code></pre>
+<h3>S2 初始化大脑（PGLite）</h3>
+<pre><code>gbrain init             # 默认 PGLite，数据落 ~\.gbrain\brain.pglite
+gbrain stats            # 期望正常输出（无 &quot;database is already open&quot;）</code></pre>
+<h3>S3 放置 llama 本地服务（二选一）</h3>
+<ul><li><strong>方案 A（推荐）</strong>：整份拷贝本机 <code>C:\Users\&lt;用户&gt;\.llama</code> 文件夹（bin + models + 两个启动脚本）。模型与二进制均为普通文件，拷贝即用。</li><li><strong>方案 B</strong>：自行下载 llama.cpp 与两个模型，按 §4.3 的参数手动启动。</li></ul>
+<pre><code># 启动（幂等，已在跑则无事发生）：
+powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$env:USERPROFILE\.llama\start-embed.ps1&quot;
+powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$env:USERPROFILE\.llama\start-rerank.ps1&quot;
+
+# 探针验证（两个都要 200）：
+Invoke-WebRequest -Uri &#x27;http://127.0.0.1:18080/v1/embeddings&#x27; -Method Post `
+  -Body ([Text.Encoding]::UTF8.GetBytes(&#x27;{&quot;input&quot;:&quot;probe&quot;,&quot;model&quot;:&quot;bge-m3&quot;}&#x27;)) `
+  -ContentType &#x27;application/json&#x27; -UseBasicParsing -TimeoutSec 10
+Invoke-WebRequest -Uri &#x27;http://127.0.0.1:18081/v1/rerank&#x27; -Method Post `
+  -Body ([Text.Encoding]::UTF8.GetBytes(&#x27;{&quot;query&quot;:&quot;q&quot;,&quot;documents&quot;:[&quot;a&quot;],&quot;model&quot;:&quot;qwen3-reranker-06b&quot;}&#x27;)) `
+  -ContentType &#x27;application/json&#x27; -UseBasicParsing -TimeoutSec 10</code></pre>
+<h3>S4 配置 gbrain（文件面 + DB 面）</h3>
+<ul><li><strong>文件面</strong> <code>~\.gbrain\config.json</code>：按 §4.2 模板补齐（引擎/嵌入/建模/端点）。</li><li><strong>DB 面</strong>（维护脚本会自动执行全部；手动执行须在 opencode 完全退出时）：</li></ul>
+<pre><code>gbrain config set facts.default_visibility world
+gbrain config set search.reranker.enabled true
+gbrain config set search.reranker.model llama-server-reranker:qwen3-reranker-06b
+gbrain config set search.reranker.timeout_ms 20000    # 高负载期快速放弃（fail-open），避免搜索被拖慢
+gbrain config set search.reranker.top_n_in 10         # 缩小重排批次，提高完成率</code></pre>
+<ul><li><strong>验证</strong>（同样须 serve 未运行）：</li></ul>
+<pre><code>gbrain providers test    # 期望：嵌入探针 ✓ + &quot;All probes green.&quot;
+gbrain search modes      # 期望：active mode = tokenmax（或你配置的模式）</code></pre>
+<h3>S5 部署脚本（5 件，放 <code>~\.config\opencode\memory\scripts\</code>，见部署包 <code>scripts\</code>）</h3>
+<table><thead><tr><th>文件</th><th>用途</th></tr></thead><tbody><tr><td><code>gbrain-capture-export.ts</code></td><td>常驻导出器（会话→corpus；<strong>内容寻址+幂等+脱敏</strong>）</td></tr><tr><td><code>start-gbrain-capture.ps1</code></td><td>导出器启动器（幂等，含写门控检查）</td></tr><tr><td><code>brain-maintenance.ps1</code> / <code>.cmd</code></td><td>维护窗口全套（锁探测→服务→配置→marker→导出→dream）</td></tr><tr><td><code>brain-onclose.ps1</code></td><td>一次性守望（关窗 ≥5min 自动跑一次维护后自退；可选）</td></tr></tbody></table>
+<h3>S6 opencode 接线（<code>opencode.jsonc</code>）</h3>
+<p>按 §4.1 模板添加 <code>mcp.gbrain</code> 块（命令 + 4 个环境变量），重启 opencode 生效。 <strong>验证</strong>：新会话里调用 <code>gbrain</code> 工具（如 whoami / recall）能通。</p>
+<h3>S7 开机自启（Startup 文件夹）</h3>
+<p>把部署包 <code>startup-templates\</code> 里的 3 个 <code>.cmd</code> 放入： <code>%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\</code></p>
+<ul><li><code>llama-embed.cmd</code>、<code>llama-rerank.cmd</code>（两个本地服务）</li><li><code>gbrain-capture.cmd</code>（常驻导出器）</li><li>（可选）<code>brain-onclose.cmd</code>（仅首次初始化时用于自动守望，成功后建议删除或让它自退）</li></ul>
+<h3>S8 首次初始化（关键）</h3>
+<p>1. <strong>完全退出 opencode，保持关闭 ≥5 分钟</strong>（或直接双击 <code>brain-maintenance.cmd</code> 手动跑）。 2. 观察 <code>~\.config\opencode\memory\logs\brain-maintenance-*.log</code>： - <code>锁探测通过</code> → <code>llama-embed/rerank 就绪=True</code> → <code>config set … =&gt; exit=0</code> - <code>marker 已写</code> → <code>全量导出 =&gt; exit=0</code> - <code>dream[各相位] =&gt; exit=0</code>（propose_takes 较慢，数分钟） 3. 重新打开 opencode。此后自动抽取/摄取在后台自行推进（首次回填数千段需数小时~1 天）。</p>
+<h3>S9 验收</h3>
+<p>按 §6 清单逐项打勾。</p>
+<hr/>
+<h2>4. 配置模板</h2>
+<h3>4.1 opencode.jsonc —— mcp 块模板</h3>
+<pre><code>&quot;mcp&quot;: {
+  &quot;gbrain&quot;: {
+    &quot;type&quot;: &quot;local&quot;,
+    &quot;command&quot;: [
+      &quot;C:\\Users\\&lt;你的用户名&gt;\\.bun\\bin\\gbrain.exe&quot;,
+      &quot;serve&quot;,
+      &quot;--surface&quot;,
+      &quot;starter&quot;
+    ],
+    &quot;enabled&quot;: true,
+    &quot;environment&quot;: {
+      &quot;GBRAIN_HOME&quot;: &quot;C:\\Users\\&lt;你的用户名&gt;&quot;,
+      &quot;LLAMA_SERVER_BASE_URL&quot;: &quot;http://127.0.0.1:18080/v1&quot;,
+      &quot;LLAMA_SERVER_RERANKER_BASE_URL&quot;: &quot;http://127.0.0.1:18081/v1&quot;,
+      &quot;GBRAIN_QUERY_EMBED_TIMEOUT_MS&quot;: &quot;30000&quot;
+    }
+  }
+}</code></pre>
+<blockquote>说明：<code>starter</code> 是工具面（约 29 个工具）；<code>GBRAIN_QUERY_EMBED_TIMEOUT_MS=30000</code> 用于回填高峰期容忍嵌入排队（默认 6s 会降级为纯关键词；另见 §8）。</blockquote>
+<h3>4.2 gbrain config.json —— 关键键模板（<code>~\.gbrain\config.json</code>）</h3>
+<pre><code>{
+  &quot;engine&quot;: &quot;pglite&quot;,
+  &quot;database_path&quot;: &quot;C:\\Users\\&lt;你的用户名&gt;\\.gbrain\\brain.pglite&quot;,
+  &quot;embedding_model&quot;: &quot;llama-server:bge-m3&quot;,
+  &quot;embedding_dimensions&quot;: 1024,
+  &quot;provider_base_urls&quot;: {
+    &quot;llama-server&quot;: &quot;http://127.0.0.1:18080/v1&quot;,
+    &quot;llama-server-reranker&quot;: &quot;http://127.0.0.1:18081/v1&quot;,
+    &quot;deepseek&quot;: &quot;http://&lt;你的网关地址&gt;:3001/v1&quot;
+  },
+  &quot;chat_model&quot;: &quot;deepseek:deepseek-flash&quot;,
+  &quot;expansion_model&quot;: &quot;deepseek:deepseek-flash&quot;,
+  &quot;deepseek_api_key&quot;: &quot;&lt;你的Key&gt;&quot;,
+  &quot;memory&quot;: { &quot;auto_writeback&quot;: &quot;salient&quot;, &quot;visibility_posture&quot;: &quot;world&quot; }
+}</code></pre>
+<blockquote><code>llama-server</code> 键名对应本地嵌入配方；<code>deepseek</code> 键名只是"OpenAI 兼容端点"的占位名（本机组用公司网关）。修改文件面配置后建议 <code>gbrain providers test</code> 验证。</blockquote>
+<h3>4.3 llama 启动参数（两服务）</h3>
+<pre><code># 嵌入（18080）
+llama-server.exe --model &quot;&lt;...&gt;\models\bge-m3-Q8_0.gguf&quot; --embeddings ^
+  --host 127.0.0.1 --port 18080 -c 8192 -b 4096 -ub 4096 --log-file &quot;&lt;...&gt;\server.log&quot;
+
+# 重排（18081；--alias 对应 gbrain 模型串 qwen3-reranker-06b）
+llama-server.exe --model &quot;&lt;...&gt;\models\qwen3-reranker-0.6b-q8_0.gguf&quot; --alias qwen3-reranker-06b ^
+  --reranking --host 127.0.0.1 --port 18081 -c 8192 -b 4096 -ub 4096 --log-file &quot;&lt;...&gt;\server-rerank.log&quot;</code></pre>
+<blockquote><code>-b/-ub 4096</code>：长文本（GBrain 长页/长段）嵌入不出 "input is too large"；<code>--host 127.0.0.1</code> 见 §8 端口坑。</blockquote>
+<hr/>
+<h2>5. 环境差异适配（迁移必读）</h2>
+<h3>5.1 端口规划与占用检查（最先做）</h3>
+<blockquote>默认规划：<strong>嵌入 18080 / 重排 18081</strong>——嵌入特意避开 8080（本机曾撞"订单系统"的 <code>0.0.0.0/[::]:8080</code> 通配监听；v1.1 起彻底分家）。</blockquote>
+<pre><code>netstat -ano | findstr :18080
+netstat -ano | findstr :18081</code></pre>
+<p>若被其他应用占用（本机曾撞"订单系统"占 <code>0.0.0.0:8080</code>）：</p>
+<ul><li>优先<strong>换端口</strong>（如 18082/18083）：同步改 start 脚本、<code>config.json</code> 的 <code>provider_base_urls</code>、opencode 环境变量；</li><li>或先停占用应用；</li><li><strong>无论何种情况</strong>，客户端地址一律写 <code>127.0.0.1</code>，不要写 <code>localhost</code>。</li></ul>
+<h3>5.2 企业 DLP（透明加密，如天锐绿盾/IP-guard）</h3>
+<ul><li><strong>若有 DLP</strong>：导出器写 corpus 必须用 <strong>bun/node 进程</strong>（Python/Office 写 .txt 会落地即加密，sweep 读密文静默失败）；对外交付说明用 <code>.md</code>（实测明文）。</li><li><strong>若无 DLP</strong>：以上限制忽略，python/node 写 .txt 均正常。</li><li><strong>配置防损坏自愈</strong>：本包 <code>scripts\fix-gbrain-config.py</code>（信任 python 运行）：<code>--check</code> 检查 config.json 是否被 DLP 加密损坏；<code>--snapshot</code> 把当前健康配置存为 <code>config.json.golden</code> 恢复基线；<code>--fix</code> 从 golden/备份恢复。建议部署完成后跑一次 <code>--snapshot</code>。</li></ul>
+<h3>5.3 内存不足时的降级策略</h3>
+<ul><li>只跑<strong>嵌入服务</strong>（检索/抽取核心）——<strong>重排不装也能用</strong>（检索 fail-open 不受影响，只是排序质量略降）；</li><li>关闭不必要的大应用；嵌入式服务常驻约 0.5–2GB，重排约 0.7–4GB（长跑会涨，重启脚本即释放）；</li><li>回填（数千段）本身就是对嵌入服务的压力测试，允许它慢慢跑（后台自动）。</li></ul>
+<h3>5.4 PowerShell 5.1 三件套（脚本已内置适配）</h3>
+<ul><li>含中文的 .ps1 必须 <strong>UTF-8 BOM</strong> 保存；</li><li>调用一律 <code>-ExecutionPolicy Bypass -File</code>；</li><li>读文件/捕获原生命令输出必须显式 UTF-8。</li></ul>
+<h3>5.5 路径与权限</h3>
+<ul><li>所有路径以 <code>%USERPROFILE%</code> 相对化；用户名不同不影响；</li><li>无需管理员：自启走 Startup 文件夹。</li></ul>
+<hr/>
+<h2>6. 验收清单</h2>
+<ul><li class="todo"><code>gbrain --version</code> ≥ 0.52.1</li><li class="todo">嵌入探针 200（§3 S3 命令）</li><li class="todo">重排探针 200</li><li class="todo"><code>gbrain providers test</code> → All probes green（serve 未运行时）</li><li class="todo"><code>~\.gbrain\transcripts\sweep-enabled.md</code>（marker）存在</li><li class="todo"><code>gbrain config get facts.default_visibility</code> → world</li><li class="todo">导出器日志（<code>memory\logs\gbrain-capture.log</code>）持续有 <code>pass done</code></li><li class="todo"><code>corpus\</code> 下 <code>.txt</code> 增长、<code>.ingested</code> 计数增长（首次回填需数小时~1 天）</li><li class="todo">任意中文词检索 → 有结果且无 <code>degraded</code>（高峰期允许 <code>embed_timeout</code> 关键词降级）</li><li class="todo">重排日志（<code>~\.llama\server-rerank.log</code>）能看到真实批次任务</li><li class="todo">维护日志 dream 六相位退出码 0（propose_takes 首次可能报错，重跑一次即可）</li><li class="todo">新会话对 gbrain 说"回忆一下 X" → 能召回别处会话产生的事实</li></ul>
+<hr/>
+<h2>7. 日常运维与故障速查</h2>
+<p><strong>常态化自动运行</strong>：导出器（常驻）/ sweep（serve 存活时自动）/ llama 双服务（开机自启）。</p>
+<p><strong>"维护窗口"何时用</strong>：需要改 DB 面配置、跑 dream（takes 学习）、全量导出铺底时 —— 完全退出 opencode ≥5 分钟后跑 <code>brain-maintenance.cmd</code>（或让守望自动跑）。</p>
+<p><strong>故障速查表</strong>：</p>
+<table><thead><tr><th>症状</th><th>可能原因</th><th>处理</th></tr></thead><tbody><tr><td>检索 0 结果 / <code>degraded: embed_unavailable</code></td><td>嵌入服务挂了</td><td>跑探针确认 → <code>start-embed.ps1</code>（幂等自愈）</td></tr><tr><td><code>degraded: embed_timeout</code>（高峰期）</td><td>回填把嵌入排队打满</td><td>属正常；等待或加大 <code>GBRAIN_QUERY_EMBED_TIMEOUT_MS</code></td></tr><tr><td>命令报 <code>database is already open through gbrain serve</code></td><td>serve 在跑（正常保护）</td><td>写类命令需关窗；读走 MCP/<code>get</code></td></tr><tr><td>sweep 不推进</td><td>serve 不在 / marker 缺失</td><td>确认 opencode 已开（serve 活）+ marker 存在</td></tr><tr><td>facts 召回不到</td><td>visibility 非 world / 刚写异步完成</td><td>检查 config；重试同一 request_id（本机协议 G-051）</td></tr><tr><td>端口探针 404 / <code>Not Found</code></td><td>同端口被其他应用 wildcard 占 &amp; llama 挂了</td><td>netstat 找真凶；重启 llama；核对是否 127.0.0.1</td></tr><tr><td>双实例（同端口两条 LISTENING）</td><td>旧脚本探针误判后双拉起</td><td>杀掉多余实例；用部署包内新版脚本（端点探针+CIM 判进程）</td></tr><tr><td>内存告急 / 服务被"杀"</td><td>长跑内存上涨（重排尤甚）</td><td>重启对应服务（释放）；关大应用；平日留 ≥4GB 空闲</td></tr><tr><td>.ps1 中文乱码</td><td>缺 BOM</td><td>用部署包内脚本（已带 BOM），勿手改编码</td></tr></tbody></table>
+<p><strong>日志位置</strong>：<code>~\.config\opencode\memory\logs\</code>（capture / maintenance / onclose）；<code>~\.llama\server*.log</code>（两个模型服务）。</p>
+<hr/>
+<h2>8. 已知坑速查（来源环境实测）</h2>
+<table><thead><tr><th>编号</th><th>一句话</th><th>处置（已内置在部署包中）</th></tr></thead><tbody><tr><td>G-058</td><td>DLP 下"信任进程"写 .txt 落地即加密</td><td>corpus 一律 bun 写（导出器已如此）</td></tr><tr><td>G-060</td><td>gbrain 锁语义：sweep 可 IPC 委托；config/dream 须关服务</td><td>维护脚本 + 双门控 auto-sweep</td></tr><tr><td>G-062</td><td><code>localhost</code> 可能解析 IPv6(::1) 撞上其他应用同端口监听 → 404</td><td>一切本地服务地址钉死 <code>127.0.0.1</code>；嵌入/重排改用独立端口 18080/18081（v1.2）</td></tr><tr><td>G-063</td><td>回填高峰期查询嵌入默认 6s 超时 → 关键词降级</td><td>环境变量 <code>GBRAIN_QUERY_EMBED_TIMEOUT_MS=30000</code></td></tr><tr><td>G-064</td><td>TCP 连得通 ≠ 服务活着（同端口 wildcard 欺骗）；双实例可同绑</td><td>健康检查=端点探针；启动脚本 PS 5.1 兼容修复</td></tr><tr><td>G-013/14</td><td>PS 5.1：中文脚本须 BOM、须 Bypass 调用</td><td>脚本已含 BOM；调用模板见 §3</td></tr><tr><td>G-051</td><td>写回执"accepted and awaiting"非失败</td><td>同 request_id 重试</td></tr></tbody></table>
+<hr/>
+<h2>附A 部署包文件清单</h2>
+<pre><code>GBrain-Hindsight-部署包-20260929\
+├─ 00-先读我（人看）.md                       ← 人：怎么用这个包（3 步）
+├─ 01-部署指令（给opencode）.md               ← AI：自动部署执行清单（发给 opencode 的那句话引用的就是它）
+├─ GBrain-Hindsight-三件套部署报告.md / .html ← 完整报告（md + HTML 渲染版）
+├─ scripts\                                  → 复制到 ~\.config\opencode\memory\scripts\
+│   ├─ gbrain-capture-export.ts               （常驻导出器）
+│   ├─ start-gbrain-capture.ps1               （导出器启动器）
+│   ├─ brain-maintenance.ps1 / .cmd           （维护窗口）
+│   ├─ fix-gbrain-config.py                   （config 被 DLP 加密损坏时的一键自愈）
+│   └─ brain-onclose.ps1                      （一次性守望，可选）
+├─ llama-scripts\                            → 复制到 ~\.llama\（若未整份拷贝 .llama）
+│   ├─ start-embed.ps1
+│   └─ start-rerank.ps1
+├─ startup-templates\                        → 放入 Startup 文件夹（&quot;%APPDATA%\...\Startup&quot;）
+│   ├─ llama-embed.cmd / llama-rerank.cmd
+│   ├─ gbrain-capture.cmd
+│   └─ brain-onclose.cmd                      （可选）
+└─ templates\
+    ├─ opencode-mcp-片段.jsonc
+    └─ gbrain-config-模板.json</code></pre>
+<p><strong>不做进包的东西（安全）</strong>：<code>config.json</code> 真身、opencode.jsonc 真身（含 Key）、<code>~\.gbrain</code> 数据库（含个人记忆）、模型权重（1.2GB，走 U 盘/共享盘整份拷贝 <code>~\.llama</code>）。</p>
+<h2>附B 来源环境实测基线（供对照）</h2>
+<ul><li>机器：Windows 10 专业版 / 15.4GB 内存</li><li>版本：GBrain 0.52.1.0 · llama.cpp b11136 · 模型 bge-m3-Q8_0(605MB) + qwen3-reranker-0.6b-q8_0(610MB)</li><li>时延（空载）：嵌入探针 ~0.8s；重排单对 ~1–5s；检索（含嵌入+重排）数秒级</li><li>回填规模参考：3000+ 段语料，摄取速度每分钟数个文件（受 LLM 提取限速），全程自动</li><li>内存占用参考：嵌入 ~0.5–4GB、重排 ~0.7–4GB（长跑上涨→重启释放）、serve ~0.4GB</li></ul>
+<hr/>
+<p>*报告完 · 有疑问联系来源环境维护者*</p>
+</div></body>
+</html>

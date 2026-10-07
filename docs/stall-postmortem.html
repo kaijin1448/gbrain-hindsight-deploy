@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GBrain-Hindsight 自动捕获「静默卡死」复盘 — 同配置机器防坑指南</title>
+  <style>
+    :root { --indigo:#4f46e5; --red:#dc2626; --amber:#d97706; --green:#16a34a; --ink:#172033; --muted:#64748b; --line:#e5e7eb; --soft:#f8fafc; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f3f5f9; color:var(--ink); font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif; line-height:1.75; font-size:15px; }
+    main { max-width:980px; margin:0 auto; padding:46px 28px 64px; }
+    header,.toc,.section { background:#fff; border:1px solid var(--line); border-radius:12px; }
+    header { border-top:5px solid var(--indigo); padding:32px 36px; margin-bottom:20px; }
+    h1 { margin:0 0 12px; color:#111827; font-size:clamp(28px,4vw,42px); line-height:1.2; letter-spacing:-.03em; }
+    h2 { margin:0 0 18px; font-size:25px; line-height:1.3; }
+    h3 { margin:22px 0 9px; font-size:18px; }
+    p { margin:10px 0; }
+    .subtitle { color:var(--muted); font-size:14px; }
+    .chips { margin-left:8px; white-space:nowrap; }
+    .chip { display:inline-block; padding:2px 9px; border:1px solid #bbf7d0; border-radius:999px; color:var(--green); background:#f0fdf4; font-size:12px; font-weight:700; }
+    .toc { padding:16px 21px; margin-bottom:22px; }
+    .toc strong { color:var(--indigo); }
+    .toc a { margin-right:14px; color:#334155; text-decoration:none; font-size:13px; }
+    .section { padding:27px 30px; margin:20px 0; box-shadow:0 3px 12px rgba(15,23,42,.03); }
+    .num { margin-right:9px; color:var(--indigo); font-family:"Cascadia Mono",Consolas,"Courier New",monospace; font-size:.7em; }
+    .callout { margin:14px 0; padding:15px 19px; border-left:4px solid var(--indigo); border-radius:0 9px 9px 0; background:#eef2ff; }
+    .callout.red { border-color:var(--red); background:#fef2f2; }
+    .callout.amber { border-color:var(--amber); background:#fffbeb; }
+    .callout.green { border-color:var(--green); background:#f0fdf4; }
+    ul { margin:9px 0 9px 22px; padding:0; }
+    li { margin:7px 0; }
+    code,pre { font-family:"Cascadia Mono",Consolas,"Courier New",monospace; }
+    code { padding:1px 5px; border-radius:4px; color:#3730a3; background:#eef2ff; font-size:.92em; }
+    pre { margin:12px 0; padding:15px 17px; overflow-x:auto; border:1px solid var(--line); border-radius:8px; background:#f8fafc; font-size:13px; line-height:1.6; white-space:pre; }
+    .code-panel { margin:14px 0; overflow:hidden; border:1px solid var(--line); border-radius:10px; }
+    .code-panel.before { border-color:#fca5a5; }
+    .code-panel.after { border-color:#86efac; }
+    .panel-title { padding:7px 14px; font-size:13px; font-weight:700; }
+    .before .panel-title { color:var(--red); background:#fef2f2; }
+    .after .panel-title { color:var(--green); background:#f0fdf4; }
+    .code-panel pre { margin:0; border:0; border-radius:0; }
+    .old-line { display:block; margin:0 -17px; padding:0 17px; color:#991b1b; background:#fee2e2; }
+    .new-line { display:block; margin:0 -17px; padding:0 17px; color:#166534; background:#dcfce7; }
+    .pipeline,.stall { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; margin:19px 0; }
+    .pipe,.msg { padding:9px 12px; border:1px solid #c7d2fe; border-radius:9px; background:#eef2ff; color:#3730a3; font-weight:700; text-align:center; }
+    .arrow { color:var(--indigo); font-weight:700; }
+    .msg { border-color:#cbd5e1; background:#f8fafc; color:var(--ink); font-size:13px; }
+    .msg.stuck { border:2px solid var(--red); color:#991b1b; background:#fef2f2; }
+    .msg.faded { opacity:.55; }
+    table { width:100%; margin:14px 0; border-collapse:collapse; font-size:14px; }
+    th,td { padding:9px 11px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:#334155; background:#f8fafc; }
+    .file-table { display:grid; grid-template-columns:1fr 2.5fr 1.2fr; margin:14px 0; border:1px solid var(--line); font-size:14px; }
+    .file-table > div { padding:9px 11px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .file-table > div:nth-child(3n) { border-right:0; }
+    .file-table .file-head { color:#334155; background:#f8fafc; font-weight:700; }
+    .stats,.cards { display:grid; gap:13px; }
+    .stats { grid-template-columns:repeat(4,1fr); margin:18px 0; }
+    .cards { grid-template-columns:repeat(3,1fr); }
+    .stat,.mini { padding:15px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .stat { text-align:center; }
+    .stat b { display:block; color:var(--indigo); font-size:26px; line-height:1.25; }
+    .stat span { color:var(--muted); font-size:13px; }
+    .mini h3 { margin-top:0; color:var(--indigo); }
+    .small { color:var(--muted); font-size:13px; }
+    footer { margin-top:28px; color:var(--muted); font-size:13px; text-align:center; }
+    @media (max-width:700px) { main{padding:22px 13px 40px;} header,.section{padding:21px 18px;} .stats,.cards{grid-template-columns:1fr 1fr;} }
+    @media print { @page{margin:14mm;} body{background:#fff;font-size:10.5pt;} main{max-width:none;padding:0;} header,.toc,.section{box-shadow:none;break-inside:avoid;} .code-panel,table,.stat,.mini,.callout{break-inside:avoid;} pre{white-space:pre-wrap;overflow:visible;font-size:9pt;} }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>GBrain-Hindsight 自动捕获「静默卡死」复盘 — 同配置机器防坑指南 <span class="chips"><span class="chip">已修复</span> <span class="chip">已验证</span></span></h1>
+    <p class="subtitle">故障窗口 2026-09-29 21:42 ～ 2026-09-30 01:41（本地时间，约 4 小时）· 状态：已修复并全链路验证 · 适用：Windows + GBrain-Hindsight（bun 导出器）同配置部署</p>
+  </header>
+  <nav class="toc">
+    <strong>目录</strong>
+    <a href="#s01">01 30 秒速读</a><a href="#s02">02 管线</a><a href="#s03">03 症状</a><a href="#s04">04 根因</a><a href="#s05">05 修复对照</a><a href="#s06">06 处置手册</a><a href="#s07">07 实战证据</a><a href="#s08">08 速查卡</a><a href="#s09">09 附录</a>
+  </nav>
+
+  <section class="section" id="s01">
+    <h2><span class="num">01</span>30 秒速读（TL;DR）</h2>
+    <div class="callout">
+      <ul>
+        <li><b>现象：</b>捕获日志一切"正常"（每 3 分钟输出一行），但 <code>touched=0</code> 持续、新对话不再进入语料——完全无报错的"静默停摆"。</li>
+        <li><b>根因：</b>导出器把一条"被中断的悬空消息"（<code>completed</code> 永远为 <code>NULL</code>）误判为"仍在流式输出"，每轮 pass 都在它身上 <code>break</code>，<b>整个会话</b>被跳过。</li>
+        <li><b>影响：</b>被堵会话约 4 小时未捕获（294 条后续消息积压）；旧逻辑要等 24 小时才自愈。</li>
+        <li><b>修复：</b>判定条件改为——"仅当未完成消息是批次<b>最新一条</b>时才等待；若其后还有消息（说明流已中断）则照常导出"。本机已落地：补录 19 段，语料 143/143 全消化。</li>
+        <li><b>防坑：</b>另一台机器先查脚本是否含 <code>newestIdx</code>；修复后<b>必须重启捕获驻留进程</b>（改文件不会热加载）。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="s02">
+    <h2><span class="num">02</span>一分钟了解这条管线（为什么它会"静默"）</h2>
+    <p>这套系统把 opencode 的对话自动导出成语料、再由 gbrain 提取成可检索的事实。链路如下：</p>
+    <div class="pipeline">
+      <span class="pipe">opencode.db</span><span class="arrow">→</span><span class="pipe">导出器 · bun 常驻循环 180s</span><span class="arrow">→</span><span class="pipe">语料 .txt</span><span class="arrow">→</span><span class="pipe">gbrain sweep</span><span class="arrow">→</span><span class="pipe">事实入库（可检索）</span>
+    </div>
+    <ul>
+      <li>导出器每 180 秒扫一次 <code>opencode.db</code>，只导出<b>水位线之后</b>的新消息（每个会话分别记录 <code>lastTs</code>/<code>lastId</code>）。</li>
+      <li>写文件前查重：同名文件或已有 <code>.ingested</code> 印章 → 跳过；天然幂等，随时可安全重跑。</li>
+      <li>关键认知：<b>"循环活着" ≠ "捕获在工作"</b>。这次故障里循环、日志、进程全都正常。</li>
+    </ul>
+    <div class="file-table">
+      <div class="file-head">名称</div><div class="file-head">路径</div><div class="file-head">作用</div>
+      <div>导出器脚本</div><div><code>%USERPROFILE%\.config\opencode\memory\scripts\gbrain-capture-export.ts</code></div><div>唯一需要打补丁的文件</div>
+      <div>捕获日志</div><div><code>%USERPROFILE%\.config\opencode\memory\logs\gbrain-capture.log</code></div><div>每轮 pass 一行记录</div>
+      <div>水位线状态</div><div><code>%USERPROFILE%\.gbrain\transcripts\oc-export-state.json</code></div><div>各会话的 lastTs/lastId</div>
+      <div>语料目录</div><div><code>%USERPROFILE%\.gbrain\transcripts\corpus\</code></div><div>.txt 语料 + .ingested 印章</div>
+      <div>启动器</div><div><code>%USERPROFILE%\.config\opencode\memory\scripts\start-gbrain-capture.ps1</code></div><div>幂等启动（已在跑则跳过）</div>
+    </div>
+  </section>
+
+  <section class="section" id="s03">
+    <h2><span class="num">03</span>症状与识别（怎么发现这个坑）</h2>
+    <ul>
+      <li>日志里连续多轮 <code>pass done: sessions=33 touched=0 msgs=0 segments: +0 written</code>，<b>而你正在活跃对话</b>；</li>
+      <li><code>oc-export-state.json</code> 的最新水位线时间<b>停滞</b>（超过 10 分钟不动就该起疑）；</li>
+      <li>语料目录没有新的 <code>.txt</code> 文件；</li>
+      <li><b>矛盾点（一锤定音）</b>：<code>opencode.db</code> 的修改时间是"刚刚"（消息在正常写库），但导出就是不发生 → 问题在导出端，不在数据源。</li>
+    </ul>
+    <h3>快速自检</h3>
+    <pre><code># ① 最近日志里 touched= 是否连续为 0？
+Get-Content "$env:USERPROFILE\.config\opencode\memory\logs\gbrain-capture.log" -Tail 20 |
+  Select-String 'pass done'</code></pre>
+    <pre><code># ② 水位线最新时间（与当前时间对比；停滞即异常）
+$st = Get-Content "$env:USERPROFILE\.gbrain\transcripts\oc-export-state.json" -Raw | ConvertFrom-Json
+$maxTs = ($st.sessions.PSObject.Properties | ForEach-Object { $_.Value.lastTs } | Measure-Object -Maximum).Maximum
+[DateTimeOffset]::FromUnixTimeMilliseconds($maxTs).ToLocalTime()</code></pre>
+    <pre><code># ③ opencode.db 是否在实时写入（对照组）
+(Get-Item "$env:USERPROFILE\.local\share\opencode\opencode.db").LastWriteTime</code></pre>
+    <div class="callout amber">全程没有任何 ERROR，进程也活着——这就是"静默"卡死最迷惑人的地方。</div>
+  </section>
+
+  <section class="section" id="s04">
+    <h2><span class="num">04</span>根因机制</h2>
+    <ul>
+      <li>触发条件：任意一次 assistant 消息输出<b>中途被中断</b>（手动停止 / 客户端异常退出 / 进程被杀）→ 该消息的 <code>completed</code> 永远为 <code>NULL</code>（"悬空消息"）。</li>
+      <li>旧逻辑（问题代码，节选；红框）：</li>
+    </ul>
+    <div class="code-panel before">
+      <div class="panel-title">问题代码</div>
+      <pre><code>if (role === 'assistant' &amp;&amp; r.completed == null) {
+  <span class="old-line">if (Date.now() - r.time_created &lt; 86_400_000) break; // 误判：视为仍在流式输出，等下一轮</span>
+  // 超 24h 才兜底导出
+}</code></pre>
+    </div>
+    <p>消息批次按时间升序处理；悬空消息后面还排着 294 条新消息，但循环在遇到悬空消息时直接 <code>break</code>，<b>跳过整个会话</b>——水位线不推进，下一轮 pass 从同一位置重读、再次 <code>break</code>，直到那条消息"年龄"超过 24 小时才被兜底导出。期间该会话的所有新对话均不进语料。</p>
+    <div class="stall">
+      <span class="msg">水位线</span><span>→</span><span class="msg">✓ 消息A</span><span>→</span><span class="msg stuck">✗ 悬空消息（堵点）</span><span>← 每轮都卡在这里 →</span><span class="msg faded">消息B</span><span class="msg faded">消息C</span><span class="msg faded">…</span><span class="msg faded">共 294 条</span><span class="msg faded">全部积压</span>
+    </div>
+    <div class="callout">
+      <b>语义洞察</b>
+      <ul>
+        <li>"真正流式中"的消息<b>必然是批次里最新的一条</b>——它后面不可能再排着更晚的消息。</li>
+        <li>若未完成消息后面还有消息 → 流已被中断，<code>completed</code> 永远不会补上 → 继续等待毫无意义。</li>
+      </ul>
+    </div>
+    <p><b>影响面：</b>任何中招会话从悬空消息起的新消息全部积压（本机实测 ~4 小时、294 条），期间事实提取与检索都拿不到这段对话。</p>
+  </section>
+
+  <section class="section" id="s05">
+    <h2><span class="num">05</span>修复对照（修复前 vs 修复后）</h2>
+    <p>补丁只改一处：<code>runPass()</code> 中未完成消息的判定逻辑。定位下面这段，整体替换。</p>
+    <div class="code-panel before">
+      <div class="panel-title">修复前</div>
+      <pre><code>    for (const r of rows) {
+      if (outOfBudget()) break;
+      const role = r.role;
+      if (role !== 'user' &amp;&amp; role !== 'assistant') continue;
+      if (role === 'assistant' &amp;&amp; r.completed == null) {
+        <span class="old-line">if (Date.now() - r.time_created &lt; 86_400_000) break; // still streaming: wait for a later pass</span>
+        // stale incomplete (&gt;24h): the stream died - export whatever text exists
+      }</code></pre>
+    </div>
+    <div class="code-panel after">
+      <div class="panel-title">修复后</div>
+      <pre><code>    // A null-completed assistant msg is only "live" when it is the newest
+    // exportable row; if any row follows it, the stream was aborted mid-way
+    // and we must export its text instead of jamming this session forever
+    // (observed 2026-09-30: one aborted msg at 21:42:44 blocked this session
+    // for ~4h; the old logic only self-healed after 24h).
+    <span class="new-line">let newestIdx = -1;
+    for (let i = rows.length - 1; i &gt;= 0; i--) {
+      const ro = rows[i].role;
+      if (ro === 'user' || ro === 'assistant') { newestIdx = i; break; }
+    }</span>
+    for (let i = 0; i &lt; rows.length; i++) {
+      const r = rows[i];
+      if (outOfBudget()) break;
+      const role = r.role;
+      if (role !== 'user' &amp;&amp; role !== 'assistant') continue;
+      if (role === 'assistant' &amp;&amp; r.completed == null) {
+        <span class="new-line">if (i === newestIdx &amp;&amp; Date.now() - r.time_created &lt; 86_400_000) break; // live stream: wait for a later pass</span>
+        // aborted mid-stream (rows follow) or stale &gt;24h: stream is dead - export whatever text exists
+        <span class="new-line">log(`note: exporting incomplete msg ${r.id} (${i === newestIdx ? 'stale&gt;24h' : 'aborted mid-stream'})`, false);</span>
+      }</code></pre>
+    </div>
+    <table>
+      <thead><tr><th>情形</th><th>修复前</th><th>修复后</th></tr></thead>
+      <tbody>
+        <tr><td>未完成消息是批次最新一条（真流式中）</td><td>等待下一轮</td><td>等待下一轮（不变）</td></tr>
+        <tr><td>未完成消息后面还有新消息（已中断）</td><td>整个会话堵死（24h 兜底才恢复）</td><td>立即按其现有文本导出，水位线正常推进</td></tr>
+        <tr><td>未完成消息超过 24h（陈旧）</td><td>兜底导出</td><td>兜底导出（不变）</td></tr>
+      </tbody>
+    </table>
+    <p class="small">悬空消息若无文本 → 仅推进水位线、不产生文件（既有逻辑已覆盖）；多条悬空消息并存 → 逐一按"非最新即已中断"处理，不受影响。</p>
+  </section>
+
+  <section class="section" id="s06">
+    <h2><span class="num">06</span>同配置机器处置手册</h2>
+    <h3>第 0 步 · 判断是否需要处理</h3>
+    <pre><code>Select-String -Path "$env:USERPROFILE\.config\opencode\memory\scripts\gbrain-capture-export.ts" -Pattern "newestIdx"</code></pre>
+    <p>有输出 = 已含修复；无输出 = 需要修复（方式 A 或 B）。</p>
+    <ul>
+      <li>方式 A（推荐 · 最快）：从已修复机器整文件复制 <code>%USERPROFILE%\.config\opencode\memory\scripts\gbrain-capture-export.ts</code>，覆盖同路径即可。脚本用 <code>$USERPROFILE</code> 相对寻址，跨机器直接可用。</li>
+      <li>方式 B（手动）：按第 05 节把"修复前"片段替换为"修复后"片段（仅此一处）。</li>
+    </ul>
+    <h3>第 2 步 · 重启捕获驻留进程（<b>必须</b>——改文件不会热加载，不重启等于没改）</h3>
+    <pre><code># 先停旧进程
+Get-CimInstance Win32_Process -Filter "Name='bun.exe'" |
+  Where-Object { $_.CommandLine -like '*gbrain-capture-export*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId }
+
+# 再启动（幂等脚本）
+&amp; "$env:USERPROFILE\.config\opencode\memory\scripts\start-gbrain-capture.ps1"</code></pre>
+    <h3>第 3 步 · 验证</h3>
+    <ul><li>正常情形：对话几分钟后，日志出现 <code>+N written</code> 即工作正常；</li><li>深度预览（可选，只读不落盘）：</li></ul>
+    <pre><code>&amp; "$env:USERPROFILE\.bun\bin\bun.exe" run "$env:USERPROFILE\.config\opencode\memory\scripts\gbrain-capture-export.ts" --once --dry-run --max-segments 0 --no-sweep</code></pre>
+    <p>若存在被堵会话，会看到多条 <code>dry-run: would write …</code> 且末行 <code>pass done: … touched=1 … [dry-run]</code>。</p>
+    <h3>已中招恢复流程（会话已被堵时，6 步）</h3>
+    <pre><code>$bun = "$env:USERPROFILE\.bun\bin\bun.exe"
+$script = "$env:USERPROFILE\.config\opencode\memory\scripts\gbrain-capture-export.ts"
+
+# 1) 确认补丁已在（应输出含 newestIdx 的行）
+Select-String -Path $script -Pattern "newestIdx"
+
+# 2) 停旧驻留进程
+Get-CimInstance Win32_Process -Filter "Name='bun.exe'" |
+  Where-Object { $_.CommandLine -like '*gbrain-capture-export*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId }
+
+# 3) 补录导出（不加 --dry-run 即真实补录）
+&amp; $bun run $script --once --max-segments 0 --no-sweep
+
+# 4) 手动 sweep 消化积压（积压 &gt;20 段时重复执行，或交给重启后的驻留进程自动分批消化）
+&amp; "$env:USERPROFILE\.bun\bin\gbrain.exe" sweep --once --budget-ms 300000 --batch-limit 20 --json
+
+# 5) 重启驻留进程
+&amp; "$env:USERPROFILE\.config\opencode\memory\scripts\start-gbrain-capture.ps1"
+
+# 6) 核验：日志 tail + 语料待消化数（期望 pending=0）
+Get-Content "$env:USERPROFILE\.config\opencode\memory\logs\gbrain-capture.log" -Tail 8
+$c = "$env:USERPROFILE\.gbrain\transcripts\corpus"
+$txt = @(Get-ChildItem $c -Filter *.txt); $side = @(Get-ChildItem $c -Filter *.ingested)
+$pending = @($txt | Where-Object { -not (Test-Path ($_.FullName + '.ingested')) })
+"txt=$($txt.Count) sidecar=$($side.Count) pending=$($pending.Count)"</code></pre>
+    <div class="callout red">
+      <b>红线提醒</b>
+      <ul>
+        <li>全程<b>不需要</b>关闭 opencode、<b>不碰数据库文件</b>（sweep 会经 serve 内部委托执行）；</li>
+        <li>停进程用普通 <code>Stop-Process</code> 即可（无需 <code>-Force</code>）；</li>
+        <li>不要删除语料目录；唯一必须记住的一步是"<b>重启驻留进程</b>"。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="s07">
+    <h2><span class="num">07</span>本次实战证据</h2>
+    <table>
+      <thead><tr><th>时刻（本地）</th><th>事件</th></tr></thead>
+      <tbody>
+        <tr><td>21:42:44</td><td>悬空消息产生（会话被堵起点）</td></tr>
+        <tr><td>00:08:28</td><td>最后一次全局捕获写入（此后 85+ 分钟 touched=0）</td></tr>
+        <tr><td>~01:33</td><td>诊断确认：水位线停滞 + 复刻查询命中"首行未完成"</td></tr>
+        <tr><td>01:40:54</td><td>dry-run 验证修复：234 条消息待处理、19 段待写</td></tr>
+        <tr><td>01:41:17</td><td>实弹补录完成：+19 段；日志出现 aborted mid-stream 标记</td></tr>
+        <tr><td>01:42–01:45</td><td>sweep 消化：187s，pending 归零</td></tr>
+        <tr><td>01:44:53</td><td>驻留进程重启（新 PID 17520）；首轮 +1 段、自动 sweep rc=0</td></tr>
+        <tr><td>01:47 / 01:50</td><td>后续两轮 tick 验证：每轮正常捕获（+1 段）、自动 sweep rc=0</td></tr>
+      </tbody>
+    </table>
+    <div class="stats">
+      <div class="stat"><b>~4 小时</b><span>被堵时长（21:42 → 01:41）</span></div>
+      <div class="stat"><b>294</b><span>积压消息数</span></div>
+      <div class="stat"><b>19</b><span>补录语料段</span></div>
+      <div class="stat"><b>143 / 143</b><span>语料 .txt / 已消化（pending=0）</span></div>
+    </div>
+    <h3>关键日志行</h3>
+    <pre><code>[2026-09-29T17:41:17Z] note: exporting incomplete msg msg_0ed674b0d001D0ZPKXDCDi7tha (aborted mid-stream)
+[2026-09-29T17:41:17Z] pass done: sessions=33 touched=1 msgs=235 segments: +19 written, 0 skip | 63ms
+[2026-09-29T17:50:55Z] pass done: sessions=33 touched=1 msgs=1 segments: +1 written, 0 skip | 8ms</code></pre>
+  </section>
+
+  <section class="section" id="s08">
+    <h2><span class="num">08</span>防坑速查卡（可打印）</h2>
+    <div class="cards">
+      <div class="mini"><h3>「每天看一眼」</h3><p>日志 <code>touched=</code> 连续为 0 且你在活跃对话 → 立即排查（第 03 节三连命令）。</p></div>
+      <div class="mini"><h3>「中招四连」</h3><p>打补丁（或整文件复制）→ 重启驻留进程 → dry-run / 日志验证 → 补录+sweep（若已积压）。</p></div>
+      <div class="mini"><h3>「别做」</h3><p>别删语料；别跳过"重启驻留进程"；别把"等 24h 自愈"当可接受方案。</p></div>
+    </div>
+    <div class="callout"><b>捕获沉默 ≠ 正常；循环活着 ≠ 在干活；补丁落了 ≠ 生效（要重启）。</b></div>
+  </section>
+
+  <section class="section" id="s09">
+    <h2><span class="num">09</span>附录</h2>
+    <h3>A · 深度诊断探针（可选，只读；用于确认"首行未完成即被堵"）：完整 bun 脚本</h3>
+    <pre><code>// probe-stuck.ts — 只读：找出"水位线之后存在'非最新'的未完成消息"的会话（即旧版脚本下会被堵的会话）
+import { Database } from 'bun:sqlite';
+import { readFileSync } from 'node:fs';
+const HOME = process.env.USERPROFILE!.replace(/\\/g, '/');
+const db = new Database(`${HOME}/.local/share/opencode/opencode.db`, { readonly: true });
+const st = JSON.parse(readFileSync(`${HOME}/.gbrain/transcripts/oc-export-state.json`, 'utf8'));
+for (const [sid, wm] of Object.entries(st.sessions as Record&lt;string, { lastTs: number; lastId: string }&gt;)) {
+  const rows = db.query(`SELECT id, json_extract(data,'$.role') AS role,
+      json_extract(data,'$.time.completed') AS completed
+    FROM message WHERE session_id = ?1 AND (time_created &gt; ?2 OR (time_created = ?2 AND id &gt; ?3))
+    ORDER BY time_created ASC, id ASC`).all(sid, wm.lastTs, wm.lastId) as Array&lt;{ id: string; role: string; completed: number | null }&gt;;
+  const k = rows.findIndex((r) =&gt; r.role === 'assistant' &amp;&amp; r.completed === null);
+  if (k &gt;= 0 &amp;&amp; k &lt; rows.length - 1) console.log(`STUCK/RISK ${sid}: firstIncomplete=${rows[k].id} (+${rows.length - k - 1} msgs behind)`);
+}
+console.log('scan done');
+db.close();</code></pre>
+    <p>（用法说明：<code>&amp; "$env:USERPROFILE\.bun\bin\bun.exe" probe-stuck.ts</code>；输出 STUCK/RISK 即该会话在旧版脚本下会被堵；修复版脚本下无需人工干预。）</p>
+    <p><b>B · 相关事实记忆：</b>本机已写入 #1337（根因）、#1338（修复与验证）。</p>
+    <p><b>C · 一句话总结：</b>一个 24 行的补丁，把一个"永久堵会话、24h 才自愈"的静默故障，变成"下一轮自动恢复"。</p>
+  </section>
+  <footer>生成于 2026-09-30（本地）· 内容来源：本机真实处置记录与日志 · 本报告自包含，离线可看、可直接打印。</footer>
+</main>
+</body>
+</html>

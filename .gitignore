@@ -1,0 +1,28 @@
+# --- secrets & local state (never commit) ---
+*.key
+*.pem
+secrets.*
+.env
+.env.*
+
+# gbrain runtime data / model weights (huge)
+*.gguf
+models/
+
+# windows / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# logs & scratch
+*.log
+*.tmp
+/tmp/
+/scratch/
+
+# backups produced by deploy.ps1 / merge-mcp.mjs
+*.bak-*

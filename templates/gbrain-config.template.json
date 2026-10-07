@@ -1,0 +1,18 @@
+{
+  "engine": "pglite",
+  "database_path": "C:\\Users\\<你的用户名>\\.gbrain\\brain.pglite",
+  "embedding_model": "llama-server:bge-m3",
+  "embedding_dimensions": 1024,
+  "provider_base_urls": {
+    "llama-server": "http://127.0.0.1:18080/v1",
+    "llama-server-reranker": "http://127.0.0.1:18081/v1",
+    "deepseek": "http://<你的网关地址>:3001/v1"
+  },
+  "chat_model": "deepseek:deepseek-flash",
+  "expansion_model": "deepseek:deepseek-flash",
+  "deepseek_api_key": "<你的Key>",
+  "memory": {
+    "auto_writeback": "salient",
+    "visibility_posture": "world"
+  }
+}

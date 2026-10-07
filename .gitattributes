@@ -1,0 +1,21 @@
+# Keep Windows-native line endings for scripts that PS 5.1 / cmd / wscript run.
+# (Git stores them as LF internally when * text=auto would normalize; explicit
+#  eol=crlf forces CRLF in the working tree on checkout so BOM+CRLF scripts
+#  stay exactly as tested.)
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.vbs   text eol=crlf
+
+# Everything else: normalized LF in the repo.
+* text=auto
+
+# Binary-ish
+*.zip   binary
+*.gguf  binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+
+# Do not diff these
+*.bak-* -diff
